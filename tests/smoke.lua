@@ -381,4 +381,32 @@ end))
 vim.fn.confirm = confirm
 vim.cmd("normal u")
 assert(api.nvim_get_current_buf() == last_thread and contents(last_thread):find("Delete the only message", 1, true))
+
+api.nvim_create_autocmd("FileType", {
+  pattern = { "comment-threads", "markdown.comment-thread-draft" },
+  callback = function(ev)
+    vim.keymap.set("n", "Q", "<Plug>(comment-threads-close)", { buffer = ev.buf })
+    if vim.bo[ev.buf].filetype == "comment-threads" then
+      vim.keymap.set("n", "gr", "<Plug>(comment-threads-reply)", { buffer = ev.buf })
+    end
+  end,
+})
+plugin.setup({ author = "Human", sidebar_min_width = false })
+api.nvim_set_current_win(source_win)
+vim.cmd.ThreadAdd()
+assert(vim.bo.filetype == "markdown.comment-thread-draft")
+vim.cmd.stopinsert()
+vim.cmd("normal Q")
+assert(api.nvim_get_current_buf() == buf)
+local previous_panel = vim.fn.bufwinid(last_thread)
+if previous_panel ~= -1 then
+  api.nvim_win_close(previous_panel, false)
+end
+local select = vim.ui.select
+vim.ui.select = function(items, _, cb)
+  cb(items[1])
+end
+vim.cmd.ThreadOpen()
+vim.ui.select = select
+assert(contents(api.nvim_get_current_buf()):find("Reply (gr)", 1, true))
 print("Anchor and CLI smoke tests passed")

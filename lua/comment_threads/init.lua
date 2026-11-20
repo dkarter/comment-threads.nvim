@@ -427,33 +427,31 @@ local function compose(title, body, save, insert)
       end
     end,
   })
-  local keys = options.mappings.composer or {}
-  if keys.close then
-    vim.keymap.set("n", keys.close, function()
-      local draft = text()
-      if
-        draft == body
-        or vim.trim(draft) == ""
-        or vim.fn.confirm("Discard this unsaved draft?", "&Discard\n&Keep editing", 2, "Warning") == 1
-      then
-        close()
-      end
-    end, { buffer = buf, desc = "Close comment composer" })
-  end
-  local caption = title .. " · :w to save" .. (keys.close and " · " .. keys.close .. " to cancel" or "")
+  local win = previous_win
   if replace then
     vim.bo[previous_buf].bufhidden = "hide"
-    api.nvim_win_set_buf(previous_win, buf)
-    api.nvim_win_set_config(previous_win, { title = " " .. caption .. " " })
+    api.nvim_win_set_buf(win, buf)
   else
-    float(buf, caption)
+    win = float(buf, title)
   end
-  vim.bo[buf].filetype = "markdown"
-  if keys.post then
-    local mapping = { buffer = buf, desc = "Post comment" }
-    vim.keymap.set("n", keys.post, "<cmd>write<cr>", mapping)
-    vim.keymap.set("i", keys.post, "<esc><cmd>write<cr>", mapping)
-  end
+  vim.bo[buf].filetype = "markdown.comment-thread-draft"
+  vim.bo[buf].syntax = "markdown"
+  local legacy = options.mappings.composer or {}
+  local keys = controls.keys(buf, legacy)
+  local caption = title .. " · :w to save" .. (keys.close and " · " .. keys.close .. " to cancel" or "")
+  api.nvim_win_set_config(win, { title = " " .. caption .. " " })
+  controls.bind(buf, "close", function()
+    local draft = text()
+    if
+      draft == body
+      or vim.trim(draft) == ""
+      or vim.fn.confirm("Discard this unsaved draft?", "&Discard\n&Keep editing", 2, "Warning") == 1
+    then
+      close()
+    end
+  end, legacy.close)
+  controls.bind(buf, "post", "<cmd>write<cr>", legacy.post)
+  controls.bind(buf, "post", "<esc><cmd>write<cr>", legacy.post, "i")
   if insert then
     vim.cmd.startinsert()
   end
@@ -547,15 +545,16 @@ local function view(root, thread, src, existing)
   local win = vim.fn.bufwinid(buf)
   local width = win ~= -1 and api.nvim_win_get_width(win) or (views[buf] and views[buf].width or options.sidebar_width)
   local compact = width < options.compact_width
-  local keys = options.mappings.thread or {}
+  local legacy = options.mappings.thread or {}
+  local keys = controls.keys(buf, legacy)
   local missing
   local function show_deleted()
     missing = true
     views[buf].click = nil
     views[buf].resize = nil
-    for action, key in pairs(keys) do
+    for action in pairs(keys) do
       if action ~= "close" and action ~= "undo" and action ~= "redo" then
-        pcall(vim.keymap.del, "n", key, { buffer = buf })
+        controls.unbind(buf, action, legacy[action])
       end
     end
     vim.bo[buf].modifiable = true
@@ -723,14 +722,13 @@ local function view(root, thread, src, existing)
       delete(root, thread, msg, actions.refresh)
     end,
   }
-  for action, key in pairs(keys) do
-    if message_actions[action] then
-      controls.map_on_message(buf, key, function(row)
-        return messages[row]
-      end, message_actions[action])
-    elseif actions[action] then
-      vim.keymap.set("n", key, actions[action], { buffer = buf })
-    end
+  for action, run in pairs(actions) do
+    controls.bind(buf, action, run, legacy[action])
+  end
+  for action, run in pairs(message_actions) do
+    controls.map_on_message(buf, action, keys[action], legacy[action], function(row)
+      return messages[row]
+    end, run)
   end
 end
 
@@ -1168,6 +1166,7 @@ function M.click()
 end
 
 function M.setup(opts)
+  vim.treesitter.language.register("markdown", "markdown.comment-thread-draft")
   options = vim.tbl_extend("force", {
     cli = plugin .. "/bin/comment-threads",
     author = vim.env.USER or vim.env.USERNAME or "human",

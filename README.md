@@ -19,16 +19,21 @@ clean up before you commit.
 <details>
 <summary>Elixir review and more screenshots</summary>
 
-![Two comments on different parts of the same Elixir line, with replies from Claude](https://github.com/user-attachments/assets/a0032c42-8a00-4bdf-8ccd-be1913debac0)
+![Two comments on different parts of the same Elixir line, with replies from OpenCode and Claude](https://github.com/user-attachments/assets/f7a8c891-0e3f-46a2-96de-c193aa56cbbf)
 
-[Thread controls](https://github.com/user-attachments/assets/12cffa4b-8318-4eca-ad5c-7716b6e18ba2) · [Reply composer](https://github.com/user-attachments/assets/49e829d9-5569-4573-897b-54c3150a3e28) · [Screenshot gallery](https://github.com/dkarter/comment-threads.nvim/issues/1)
+[Thread controls](https://github.com/user-attachments/assets/0ce08508-059b-44b9-abc5-668803f3ffe2) · [Reply composer](https://github.com/user-attachments/assets/49e829d9-5569-4573-897b-54c3150a3e28) · [Screenshot gallery](https://github.com/dkarter/comment-threads.nvim/issues/1)
 
 </details>
 
 ## Install
 
-Requires Neovim 0.11+, Python 3.9+ with SQLite, and Git for worktree detection.
-Use a Nerd Font for icons.
+Requires Neovim 0.11+, Python 3.9+ with SQLite for the bundled CLI, and Git
+for worktree detection. The CLI uses Python’s standard library; no `pip`
+install is needed.
+
+A Nerd Font renders the UI icons. The agent logos in the screenshots use
+[Agent Mono Nerd Font](https://github.com/dkarter/dotfiles/tree/master/assets/fonts).
+Other fonts can use plain author markers instead.
 
 With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
@@ -37,12 +42,14 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
   "dkarter/comment-threads.nvim",
   main = "comment_threads",
   lazy = false,
-  opts = {
-    mappings = {
-      composer = { post = "<C-CR>", close = "q" },
-      thread = { activate = "<CR>", reply = "r", edit = "e", toggle = "x", close = "q" },
-      browser = { jump = "<CR>", open = "o", close = "q" },
-    },
+  opts = {},
+  keys = {
+    { "<leader>cn", "<cmd>ThreadAdd<cr>", desc = "New comment" },
+    { "<leader>cn", function() require("comment_threads").add_selection() end, mode = "x", desc = "Comment on selection" },
+    { "<leader>cl", "<cmd>ThreadList<cr>", desc = "List threads" },
+    { "<CR>", "<Plug>(comment-threads-activate)", ft = "comment-threads" },
+    { "o", "<Plug>(comment-threads-open)", ft = "comment-threads" },
+    { "q", "<Plug>(comment-threads-close)", ft = { "comment-threads", "markdown.comment-thread-draft" } },
   },
 }
 ```
@@ -54,9 +61,8 @@ example, mouse controls, and CLI usage.
 
 ## Try it
 
-- Run `:ThreadAdd` on a saved file to comment on the current line. For exact
-  selections, use the visual mapping in the configuration guide. Write your
-  comment and save with `:w`.
+- Press `<leader>cn` on a saved file to comment on the current line or visual
+  selection. Write your comment and save with `:w`.
 - Run `:ThreadList` to browse threads, or `:ThreadOpen` to open the thread
   under the cursor.
 - Run `:ThreadHandoff` to copy a prompt for an agent in the same worktree.

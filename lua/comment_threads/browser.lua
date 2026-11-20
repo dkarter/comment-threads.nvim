@@ -7,7 +7,9 @@ local inset = rail .. "  "
 local button_styles = { reply = "Primary", toggle = "Positive", delete = "Danger" }
 local M = {}
 
-function M.open(buf, win, source_win, filter, keys, callbacks)
+function M.open(buf, win, source_win, filter, legacy, callbacks)
+  local keys = controls.keys(buf, legacy)
+  keys.jump = keys.jump or keys.activate
   local sections = {}
   local buttons, messages = {}, {}
   local folds = {}
@@ -266,9 +268,7 @@ function M.open(buf, win, source_win, filter, keys, callbacks)
   end
 
   local function map(action, fn)
-    if keys[action] then
-      vim.keymap.set("n", keys[action], fn, { buffer = buf })
-    end
+    controls.bind(buf, action, fn, legacy[action])
   end
   map("close", function()
     api.nvim_win_close(win, false)
@@ -310,16 +310,14 @@ function M.open(buf, win, source_win, filter, keys, callbacks)
     end)
   end
   for _, action in ipairs({ "edit", "delete" }) do
-    if keys[action] then
-      controls.map_on_message(buf, keys[action], function(row)
-        local section = current_section(row)
-        if section and messages[row] then
-          return { thread = section.thread, msg = messages[row] }
-        end
-      end, function(item)
-        callbacks.action(action, item.thread, item.msg)
-      end)
-    end
+    controls.map_on_message(buf, action, keys[action], legacy[action], function(row)
+      local section = current_section(row)
+      if section and messages[row] then
+        return { thread = section.thread, msg = messages[row] }
+      end
+    end, function(item)
+      callbacks.action(action, item.thread, item.msg)
+    end)
   end
   map("jump", function()
     local row, col = unpack(api.nvim_win_get_cursor(win))
@@ -343,6 +341,7 @@ function M.open(buf, win, source_win, filter, keys, callbacks)
       vim.cmd("normal! zv")
     end
   end)
+  map("activate", "<Plug>(comment-threads-jump)")
   return {
     render = render,
     follow = follow,

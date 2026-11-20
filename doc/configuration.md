@@ -29,21 +29,22 @@ spec. These mappings are opt-in; the plugin does not bind keys by default.
     { "[v", function() require("comment_threads").jump(-1) end, desc = "Previous thread" },
     { "]v", function() require("comment_threads").jump(1) end, desc = "Next thread" },
     { "<LeftMouse>", function() return require("comment_threads").click() end, expr = true, desc = "Click comment action" },
+    { "<CR>", "<Plug>(comment-threads-activate)", ft = "comment-threads", desc = "Activate comment action" },
+    { "o", "<Plug>(comment-threads-open)", ft = "comment-threads", desc = "Open thread from list" },
+    { "r", "<Plug>(comment-threads-reply)", ft = "comment-threads", desc = "Reply" },
+    { "x", "<Plug>(comment-threads-toggle)", ft = "comment-threads", desc = "Resolve or reopen" },
+    { "e", "<Plug>(comment-threads-edit)", ft = "comment-threads", nowait = true, desc = "Edit message" },
+    { "d", "<Plug>(comment-threads-delete)", ft = "comment-threads", nowait = true, desc = "Delete message" },
+    { "R", "<Plug>(comment-threads-refresh)", ft = "comment-threads", desc = "Refresh thread" },
+    { "q", "<Plug>(comment-threads-close)", ft = { "comment-threads", "markdown.comment-thread-draft" }, desc = "Close comment view" },
+    { "u", "<Plug>(comment-threads-undo)", ft = "comment-threads", desc = "Undo comment change" },
+    { "<C-r>", "<Plug>(comment-threads-redo)", ft = "comment-threads", desc = "Redo comment change" },
+    { "za", "<Plug>(comment-threads-fold-toggle)", ft = "comment-threads", desc = "Toggle thread fold" },
+    { "zo", "<Plug>(comment-threads-fold-open)", ft = "comment-threads", desc = "Expand thread" },
+    { "zc", "<Plug>(comment-threads-fold-close)", ft = "comment-threads", desc = "Collapse thread" },
+    { "<C-CR>", "<Plug>(comment-threads-post)", ft = "markdown.comment-thread-draft", mode = { "n", "i" }, desc = "Post comment" },
   },
-  opts = {
-    mappings = {
-      composer = { post = "<C-CR>", close = "q" },
-      thread = {
-        activate = "<CR>", reply = "r", edit = "e", delete = "d",
-        toggle = "x", refresh = "R", close = "q", undo = "u", redo = "<C-r>",
-      },
-      browser = {
-        jump = "<CR>", open = "o", reply = "r", edit = "e", delete = "d",
-        toggle = "x", close = "q", undo = "u", redo = "<C-r>",
-        fold_toggle = "za", fold_open = "zo", fold_close = "zc",
-      },
-    },
-  },
+  opts = {},
 }
 ```
 
@@ -68,15 +69,15 @@ without mappings.
 Use `r` to reply, `e` on a message to edit it, `x` to resolve or reopen, and
 `R` to see the agent's latest replies. Use `:w` or `Ctrl+Enter` to post from
 the Markdown composer. `Ctrl+Enter` requires a terminal that reports it
-separately from `Enter`. Customize buffer-local shortcuts under `mappings`
-in `setup()` or Lazy's `opts`.
+separately from `Enter`. Change the left-hand sides in Lazy's `keys` to
+customize the shortcuts; button hints use the actual mappings.
 
 Threads open in a right-hand split when the source window is at least 108
 columns wide, or in a float when it is narrower. Set `sidebar_min_width` or
 `sidebar_width` to change the layout, or `sidebar_min_width = false` to always
 use floats. The docked browser follows the source cursor. Press `Enter` on a
 thread to jump to its text, `o` to open it for replies and edits, or `q` to
-close the browser (bindings come from `mappings.browser`).
+close the browser.
 Moving through the browser previews the corresponding anchor in the source
 window. Narrow panes use icon buttons, and individual thread views use shorter
 timestamps.
@@ -102,6 +103,13 @@ redo refuse to overwrite newer changes to the same thread.
 Mouse actions require Neovim mouse reporting and the `<LeftMouse>` expression
 mapping above. Set `author` to change your displayed name and
 `author_icons = { human = "●", opencode = "◆" }` to customize byline icons.
+For the logos in the screenshots, install
+[Agent Mono Nerd Font](https://github.com/dkarter/dotfiles/tree/master/assets/fonts)
+and select that font in your terminal. Then set, for example:
+
+```lua
+author_icons = { human = "", opencode = "", claude = "", codex = "", pi = "" }
+```
 
 Exact selections get a yellow highlight and an inline comment glyph.
 Whole-line comments use the gutter only; when several threads start on one

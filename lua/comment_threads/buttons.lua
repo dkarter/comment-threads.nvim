@@ -34,11 +34,42 @@ function M.add(buttons, lines, label, run, style, key)
   }
 end
 
-function M.map_on_message(buf, key, at_row, run)
-  vim.keymap.set("n", key, function()
+local function plug(action)
+  return "<Plug>(comment-threads-" .. action:gsub("_", "-") .. ")"
+end
+
+function M.keys(buf, legacy)
+  local bindings = vim.tbl_extend("force", {}, legacy)
+  for _, map in ipairs(api.nvim_buf_get_keymap(buf, "n")) do
+    local action = map.rhs and map.rhs:match("^<Plug>%(comment%-threads%-([%w%-]+)%)$")
+    if action then
+      bindings[action:gsub("-", "_")] = map.lhs
+    end
+  end
+  return bindings
+end
+
+function M.bind(buf, action, run, legacy, mode, expr)
+  mode = mode or "n"
+  local target = plug(action)
+  vim.keymap.set(mode, target, run, { buffer = buf, expr = expr, nowait = expr })
+  if legacy then
+    vim.keymap.set(mode, legacy, target, { buffer = buf, nowait = expr })
+  end
+end
+
+function M.unbind(buf, action, legacy)
+  pcall(vim.keymap.del, "n", plug(action), { buffer = buf })
+  if legacy then
+    pcall(vim.keymap.del, "n", legacy, { buffer = buf })
+  end
+end
+
+function M.map_on_message(buf, action, key, legacy, at_row, run)
+  M.bind(buf, action, function()
     local msg = at_row(api.nvim_win_get_cursor(0)[1])
     if not msg then
-      return key
+      return key or ""
     end
     vim.schedule(function()
       if api.nvim_get_current_buf() == buf then
@@ -46,7 +77,7 @@ function M.map_on_message(buf, key, at_row, run)
       end
     end)
     return ""
-  end, { buffer = buf, expr = true, nowait = true })
+  end, legacy, "n", true)
 end
 
 function M.paint(buf, ns, buttons)

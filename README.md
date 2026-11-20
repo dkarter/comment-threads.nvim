@@ -1,29 +1,24 @@
 # comment-threads.nvim
 
-Leave comments on code or prose in Neovim, then let an agent reply from its
-own terminal. Threads live outside your source files, so there’s nothing to
-clean up before you commit.
+**Review code and prose with your agent, right in Neovim.** Highlight a
+passage, leave a note, and see OpenCode’s reply land in the same thread.
+No pasted excerpts, no review notes in your diff.
 
 ![Markdown release notes with an active selection, an OpenCode reply, a whole-line comment, and a collapsed resolved thread](https://github.com/user-attachments/assets/b3ca9993-e860-44ca-bd24-c7dedb8e6259)
 
 ## Features
 
-- Annotate whole lines or exact text ranges. Multiple threads can share a line.
-- Browse threads in a sidebar that follows the current file and highlights
-  the selected thread’s source. Narrow windows use a popup.
-- Write and edit replies in a normal Markdown buffer. Fold, resolve, reopen,
-  or delete threads with the keyboard or mouse. Undo and redo comment changes.
-- Hand off open threads to OpenCode, Claude Code, Codex, or Pi with the bundled
-  CLI. Replies appear live without polling, and data stays local to the worktree.
-
-<details>
-<summary>Elixir review and more screenshots</summary>
-
-![Two comments on different parts of the same Elixir line, with replies from OpenCode and Claude](https://github.com/user-attachments/assets/f7a8c891-0e3f-46a2-96de-c193aa56cbbf)
-
-[Thread controls](https://github.com/user-attachments/assets/0ce08508-059b-44b9-abc5-668803f3ffe2) · [Reply composer](https://github.com/user-attachments/assets/49e829d9-5569-4573-897b-54c3150a3e28) · [Screenshot gallery](https://github.com/dkarter/comment-threads.nvim/issues/1)
-
-</details>
+- **Point to the exact words.** Comment on a phrase, a block, or a whole line.
+  Put separate threads on different parts of the same line.
+- **Hand off to OpenCode.** Copy a prompt with `:ThreadHandoff`. Agent replies
+  appear live without polling. Claude Code, Codex, and Pi use the same CLI.
+- **Keep your Vim motions.** Compose and edit in a Markdown buffer. Reply,
+  resolve, reopen, or delete with keys or clicks. Undo and redo comment changes.
+- **Keep open questions in view.** The sidebar follows your file and
+  highlights the source for the selected thread. Resolved threads collapse
+  out of the way.
+- **Keep the diff clean.** Threads stay local to your worktree, separate from
+  the files you’re reviewing.
 
 ## Install
 
@@ -66,5 +61,18 @@ example, mouse controls, and CLI usage.
 - Run `:ThreadList` to browse threads, or `:ThreadOpen` to open the thread
   under the cursor.
 - Run `:ThreadHandoff` to copy a prompt for an agent in the same worktree.
+
+## In action
+
+**Two conversations on one Elixir line.** Review each sort key independently.
+
+![Elixir query with two annotations on one line and replies from OpenCode and Claude](https://github.com/user-attachments/assets/f7a8c891-0e3f-46a2-96de-c193aa56cbbf)
+
+**Resolved, but not lost.** Two settled threads fold down to one row each,
+leaving the open Lua discussion front and center.
+
+![An open Lua review thread with an OpenCode reply and two collapsed resolved threads below it](https://github.com/user-attachments/assets/edf0ebe9-68d8-4dce-9cf0-da4413ab5ac6)
+
+[Thread controls](https://github.com/user-attachments/assets/0ce08508-059b-44b9-abc5-668803f3ffe2) · [Reply composer](https://github.com/user-attachments/assets/49e829d9-5569-4573-897b-54c3150a3e28) · [Full screenshot gallery](https://github.com/dkarter/comment-threads.nvim/issues/1)
 
 [MIT license](LICENSE)

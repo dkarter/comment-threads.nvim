@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Local worktree inbox shared by Neovim and terminal agents."""
+
+import argparse
+from contextlib import closing
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import uuid
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    status_by TEXT,
+    status_at TEXT
+);
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    author TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    edited_at TEXT,
+    revision INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS threads_path ON threads(path);
+CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
+CREATE TABLE IF NOT EXISTS message_ids (singleton INTEGER PRIMARY KEY, last_id INTEGER NOT NULL);
+"""
+
+MUTATIONS = {"create", "reply", "edit", "delete", "resolve", "reopen", "attach"}
+
+
+def workspace():
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+    )
+    return Path(result.stdout.rstrip("\n")).resolve() if result.returncode == 0 else Path.cwd()
+
+
+def inbox_path(root):
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    key = hashlib.sha256(os.fsencode(root)).hexdigest()
+    return data / "comment-threads" / f"{key}.sqlite3"
+
+
+def connect(path):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+    db = sqlite3.connect(path, timeout=5)
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    return db
+
+
+def signal_change(path):
+    # Replace the marker so directory watchers see a change even on filesystems
+    # that do not report edits to a child file's contents.
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".notify-", delete=False) as marker:
+        name = marker.name
+    try:
+        os.replace(name, path.with_suffix(".changed"))
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def fetch(db, *, thread_id=None, path=None, status=None):
+    filters = {"id": thread_id, "path": path, "status": status}
+    where = " AND ".join(f"{key} = ?" for key, value in filters.items() if value is not None)
+    values = [value for value in filters.values() if value is not None]
+    threads = []
+    for row in db.execute("SELECT * FROM threads WHERE " + (where or "1") + " ORDER BY rowid", values):
+        thread = dict(row)
+        thread["anchor"] = json.loads(thread["anchor"])
+        thread["messages"] = [
+            dict(msg)
+            for msg in db.execute(
+                """SELECT id, author, body, created_at, edited_at, revision
+                   FROM messages WHERE thread_id = ? ORDER BY id""",
+                (row["id"],),
+            )
+        ]
+        threads.append(thread)
+    return threads
+
+
+def require_thread(db, thread_id):
+    threads = fetch(db, thread_id=thread_id)
+    if not threads:
+        raise ValueError(f"No thread {thread_id}")
+    return threads[0]
+
+
+def snapshot(db, thread_id):
+    return next(iter(fetch(db, thread_id=thread_id)), False)
+
+
+def add_message(db, thread_id, author, body):
+    db.execute(
+        """INSERT INTO message_ids VALUES (1, (SELECT coalesce(max(id), 0) + 1 FROM messages))
+           ON CONFLICT(singleton) DO UPDATE SET last_id = max(last_id + 1, excluded.last_id)"""
+    )
+    db.execute(
+        """INSERT INTO messages (id, thread_id, author, body)
+           SELECT last_id, ?, ?, ? FROM message_ids WHERE singleton = 1""",
+        (thread_id, author, body),
+    )
+
+
+def normalize_snapshot(value, thread_id):
+    if value is False:
+        return value
+    if value["id"] != thread_id or value["status"] not in ("open", "resolved") or not value["messages"]:
+        raise ValueError("Invalid thread snapshot")
+    value.setdefault("status_by", None)
+    value.setdefault("status_at", None)
+    for msg in value["messages"]:
+        msg.setdefault("edited_at", None)
+    return value
+
+
+def restore(db, thread_id):
+    change = json.load(sys.stdin)
+    expected = normalize_snapshot(change["expected"], thread_id)
+    replacement = normalize_snapshot(change["replacement"], thread_id)
+    if snapshot(db, thread_id) != expected:
+        raise ValueError("Thread changed since this action. Undo/redo would overwrite newer changes.")
+    if expected:
+        db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
+    if not replacement:
+        db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
+        return False
+    thread = dict(replacement, anchor=encode_anchor(replacement["anchor"]))
+    db.execute(
+        """INSERT INTO threads (id, path, anchor, status, status_by, status_at)
+           VALUES (:id, :path, :anchor, :status, :status_by, :status_at)
+           ON CONFLICT(id) DO UPDATE SET path = excluded.path, anchor = excluded.anchor,
+             status = excluded.status, status_by = excluded.status_by, status_at = excluded.status_at""",
+        thread,
+    )
+    db.executemany(
+        """INSERT INTO messages (id, thread_id, author, body, created_at, edited_at, revision)
+           VALUES (:id, :thread_id, :author, :body, :created_at, :edited_at, :revision)""",
+        (dict(msg, thread_id=thread_id) for msg in replacement["messages"]),
+    )
+    return replacement
+
+
+def message_body(args):
+    body = args.body if args.body is not None else sys.stdin.read()
+    return validate_body(body)
+
+
+def validate_body(body):
+    if not isinstance(body, str) or not body.strip():
+        raise ValueError("Comment text cannot be empty")
+    return body
+
+
+def author_name(value):
+    value = value.strip()
+    if not value or len(value.splitlines()) != 1:
+        raise argparse.ArgumentTypeError("Author must be a nonempty single line")
+    return value
+
+
+def encode_anchor(anchor):
+    if (
+        not isinstance(anchor, dict)
+        or anchor.get("kind") not in ("line", "text")
+        or any(not isinstance(anchor.get(k), str) for k in ("quote", "prefix", "suffix", "digest"))
+        or any(type(anchor.get(k)) is not int or anchor[k] < 0 for k in ("offset", "line"))
+        or (anchor["kind"] == "text" and not anchor["quote"])
+    ):
+        raise ValueError("Invalid anchor")
+    return json.dumps(anchor)
+
+
+def run(db, args, root):
+    command = args.command
+    if command == "list":
+        return fetch(db, path=args.path, status=None if args.all else args.status)
+    if command == "create":
+        payload = json.load(sys.stdin)
+        path = Path(payload["path"])
+        resolved_path = (root / path).resolve()
+        if path.is_absolute() or not resolved_path.is_relative_to(root) or resolved_path == root:
+            raise ValueError("Source path must be workspace-relative")
+        body = validate_body(payload["body"])
+        thread_id = uuid.uuid4().hex[:12]
+        db.execute(
+            "INSERT INTO threads (id, path, anchor) VALUES (?, ?, ?)",
+            (thread_id, resolved_path.relative_to(root).as_posix(), encode_anchor(payload["anchor"])),
+        )
+        add_message(db, thread_id, args.author, body)
+        return require_thread(db, thread_id)
+
+    thread_id = args.id
+    if command == "show":
+        return require_thread(db, thread_id)
+    if command == "restore":
+        return restore(db, thread_id)
+    if command == "reply":
+        add_message(db, thread_id, args.author, message_body(args))
+    elif command == "edit":
+        body = message_body(args)
+        result = db.execute(
+            """UPDATE messages SET body = ?, edited_at = CURRENT_TIMESTAMP, revision = revision + 1
+               WHERE thread_id = ? AND id = ? AND revision = ?""",
+            (body, thread_id, args.message, args.revision),
+        )
+        if not result.rowcount:
+            raise ValueError("Message changed or was not found. Reopen it before editing.")
+    elif command == "delete":
+        db.execute("INSERT OR IGNORE INTO message_ids SELECT 1, coalesce(max(id), 0) FROM messages")
+        result = db.execute(
+            "DELETE FROM messages WHERE thread_id = ? AND id = ? AND revision = ?",
+            (thread_id, args.message, args.revision),
+        )
+        if not result.rowcount:
+            raise ValueError("Message changed or was not found. Select it again before deleting.")
+        db.execute(
+            "DELETE FROM threads WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ?)",
+            (thread_id, thread_id),
+        )
+        return {"deleted": True}
+    elif command in ("resolve", "reopen"):
+        db.execute(
+            "UPDATE threads SET status = ?, status_by = ?, status_at = CURRENT_TIMESTAMP WHERE id = ?",
+            ("resolved" if command == "resolve" else "open", args.author, thread_id),
+        )
+    elif command == "attach":
+        db.execute(
+            "UPDATE threads SET anchor = ? WHERE id = ?",
+            (encode_anchor(json.load(sys.stdin)), thread_id),
+        )
+    return require_thread(db, thread_id)
+
+
+def parser():
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--root", type=Path, help="Override the Git worktree root (or current directory)")
+    cli.add_argument("--record", action="store_true", help=argparse.SUPPRESS)
+    commands = cli.add_subparsers(dest="command", required=True)
+
+    listing = commands.add_parser("list", help="List open threads, including their messages")
+    filters = listing.add_mutually_exclusive_group()
+    filters.add_argument("--all", action="store_true")
+    filters.add_argument("--status", choices=("open", "resolved"), default="open")
+    listing.add_argument("--path", help="Filter by workspace-relative path")
+
+    for name in ("show", "reply", "edit", "delete", "resolve", "reopen", "attach", "restore"):
+        sub = commands.add_parser(name)
+        sub.add_argument("id")
+        if name in ("reply", "resolve", "reopen"):
+            sub.add_argument("--author", required=True, type=author_name)
+        if name in ("edit", "delete"):
+            sub.add_argument("message", type=int)
+            sub.add_argument("--revision", type=int, required=True)
+        if name in ("reply", "edit"):
+            sub.add_argument("--body", help="Message text (otherwise read stdin)")
+    commands.add_parser("create", help="Create a thread from a Neovim JSON payload").add_argument(
+        "--author", required=True, type=author_name
+    )
+    return cli
+
+
+def main():
+    args = parser().parse_args()
+    root = args.root.resolve() if args.root else workspace()
+    try:
+        path = inbox_path(root)
+        if args.command == "list" and not path.exists():
+            print("[]")
+            return 0
+        with closing(connect(path)) as db:
+            db.executescript(SCHEMA)
+            with db:
+                record = args.record and args.command in MUTATIONS
+                if record or args.command == "restore":
+                    db.execute("BEGIN IMMEDIATE")
+                if record:
+                    before = snapshot(db, args.id) if args.command != "create" else False
+                result = run(db, args, root)
+                if record:
+                    thread_id = result["id"] if args.command == "create" else args.id
+                    result = {
+                        "result": result,
+                        "change": {"id": thread_id, "before": before, "after": snapshot(db, thread_id)},
+                    }
+        if args.command not in ("list", "show"):
+            try:
+                signal_change(path)
+            except OSError as error:
+                print(f"comment-threads: saved, but could not notify Neovim: {error}", file=sys.stderr)
+        print(json.dumps(result, indent=2))
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+        print(f"comment-threads: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -36,6 +36,8 @@ jobs:
       - id: release
         if: github.event_name == 'push'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          skip-github-pull-request: true
       - id: draft
         if: steps.release.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
         env:
@@ -160,3 +162,46 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isImmutable |
             jq -e '(.isDraft == false) and .isImmutable'
+
+  release-pr:
+    needs: [prepare, publish]
+    # On ordinary pushes there may be no draft to build or publish.
+    if: >-
+      !cancelled() &&
+      needs.prepare.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check the release baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Read the same branch as Release Please, not the workflow event's SHA.
+          version=$(gh api "repos/$GITHUB_REPOSITORY/contents/.release-please-manifest.json?ref=main" \
+            -H 'Accept: application/vnd.github.raw+json' | jq -er '.["."]')
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version in the release manifest: $version"
+            exit 1
+          fi
+          # The version tag is created only when the draft is published.
+          # A previous run may have left a draft even if this run had no work.
+          tag=$(git ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/v$version")
+          published=false
+          if [[ -n "$tag" ]]; then
+            published=$(gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft | not')
+          fi
+          if [[ "$published" != true ]]; then
+            echo "::notice::Waiting for v$version to be published before generating a release PR."
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - name: Update the release PR
+        if: steps.baseline.outputs.ready == 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          skip-github-release: true

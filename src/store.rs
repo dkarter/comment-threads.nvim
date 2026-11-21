@@ -186,6 +186,17 @@ pub fn fetch(
     Ok(threads)
 }
 
+pub fn clear(db: &Connection, resolved_only: bool) -> Result<usize> {
+    db.execute(
+        "DELETE FROM messages WHERE thread_id IN (SELECT id FROM threads WHERE NOT ?1 OR status = 'resolved')",
+        [resolved_only],
+    )?;
+    Ok(db.execute(
+        "DELETE FROM threads WHERE NOT ?1 OR status = 'resolved'",
+        [resolved_only],
+    )?)
+}
+
 pub fn require_thread(db: &Connection, id: &str) -> Result<Thread> {
     match snapshot(db, id)? {
         Snapshot::Thread(thread) => Ok(*thread),

@@ -49,6 +49,15 @@ enum Action {
         #[arg(long)]
         path: Option<String>,
     },
+    /// Permanently clear threads in this worktree
+    Clear {
+        /// Delete resolved threads only
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        resolved: bool,
+        /// Delete every thread
+        #[arg(long)]
+        all: bool,
+    },
     /// Show one thread and its messages
     Show { id: String },
     /// Post a reply (read stdin if --body is omitted)
@@ -101,7 +110,7 @@ enum Action {
 impl Action {
     fn id(&self) -> Option<&str> {
         match self {
-            Self::List { .. } | Self::Create { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Clear { .. } => None,
             Self::Show { id }
             | Self::Reply { id, .. }
             | Self::Edit { id, .. }
@@ -184,6 +193,9 @@ fn apply(db: &Connection, root: &Path, action: &Action, input: &str) -> Result<V
             let status = (!all).then(|| status.unwrap_or(Status::Open).as_str());
             return Ok(to_value(store::fetch(db, None, path.as_deref(), status)?)?);
         }
+        Action::Clear { resolved, .. } => {
+            return Ok(json!({"cleared": store::clear(db, *resolved)?}));
+        }
         Action::Create { author } => {
             let new: NewThread = serde_json::from_str(input)?;
             return Ok(to_value(store::create(
@@ -247,8 +259,12 @@ fn run(cli: Cli) -> Result<Value> {
     let root = workspace(cli.root.as_deref())?;
     let db_path = store::inbox_path(&root)?;
     let action = cli.action;
-    if matches!(action, Action::List { .. }) && !db_path.try_exists()? {
-        return Ok(json!([]));
+    if matches!(action, Action::List { .. } | Action::Clear { .. }) && !db_path.try_exists()? {
+        match action {
+            Action::List { .. } => return Ok(json!([])),
+            Action::Clear { .. } => return Ok(json!({"cleared": 0})),
+            _ => {}
+        }
     }
     let input = action.input()?;
     let mut db = store::connect(&db_path)?;
@@ -256,7 +272,7 @@ fn run(cli: Cli) -> Result<Value> {
         return apply(&db, &root, &action, &input);
     }
     let transaction = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let record = cli.record && !matches!(action, Action::Restore { .. });
+    let record = cli.record && !matches!(action, Action::Restore { .. } | Action::Clear { .. });
     let before = if record && let Some(id) = action.id() {
         store::snapshot(&transaction, id)?
     } else {
@@ -279,7 +295,9 @@ fn run(cli: Cli) -> Result<Value> {
         None
     };
     transaction.commit()?;
-    if let Err(err) = store::signal_change(&db_path) {
+    if !(matches!(action, Action::Clear { .. }) && result["cleared"].as_u64() == Some(0))
+        && let Err(err) = store::signal_change(&db_path)
+    {
         eprintln!("comment-threads: saved, but could not notify Neovim: {err:#}");
     }
     if let Some((id, before, after)) = change {

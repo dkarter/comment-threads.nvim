@@ -25,7 +25,9 @@ spec. These mappings are opt-in; the plugin does not bind keys by default.
     { "<leader>cn", "<cmd>ThreadAdd<cr>", desc = "New comment thread" },
     { "<leader>cn", function() require("comment_threads").add_selection() end, mode = "x", desc = "Comment on selection" },
     { "<leader>co", "<cmd>ThreadOpen<cr>", desc = "Open comment thread" },
-    { "<leader>cl", "<cmd>ThreadList<cr>", desc = "List comment threads" },
+    { "<leader>cl", "<cmd>ThreadList<cr>", desc = "List comment threads in the sidebar" },
+    { "<leader>cp", "<cmd>ThreadPopup<cr>", desc = "List comment threads in a popup" },
+    { "<leader>cf", "<cmd>ThreadFind<cr>", desc = "Find comment threads across files" },
     { "<leader>ch", "<cmd>ThreadHandoff<cr>", desc = "Copy agent handoff" },
     { "<leader>cr", "<cmd>ThreadReattach<cr>", desc = "Reattach comment thread" },
     { "<leader>cr", function() require("comment_threads").reattach_selection() end, mode = "x", desc = "Reattach to selection" },
@@ -80,7 +82,11 @@ without mappings.
 | --- | --- |
 | `<leader>cn` | Start a thread on the current line or a visual selection (characterwise or linewise). Save the source file first. |
 | `<leader>co` | Open the highlighted thread under the cursor; pick if several match. |
-| `<leader>cl` | Scroll through all threads and their replies for this file. Use `:ThreadList open` or `:ThreadList resolved` to filter. |
+| `<leader>cl` | Browse threads for this file in the right-hand sidebar. Use `:ThreadList open` or `:ThreadList resolved` to filter. |
+| `<leader>cp` | Browse the same threads in a popup. `:ThreadPopup` accepts the same filters. |
+| `<leader>cf` / `:ThreadFind` | Pick a thread from any file in this worktree and focus its card in the sidebar, with its source text in view. Uses your `vim.ui.select` picker, such as Snacks, for fuzzy search. |
+| `:ThreadClearResolved` | Confirm and permanently delete resolved threads in this worktree. |
+| `:ThreadClearAll` | Confirm and permanently delete all threads in this worktree. |
 | `]v` / `[v` | Jump to the next or previous attached open thread in this file. |
 | `<leader>cr` | Reattach a thread to the line or selection. |
 | `:ThreadRefresh` | Reload the current file's comments and gutter signs from disk. |
@@ -92,10 +98,13 @@ the Markdown composer. `Ctrl+Enter` requires a terminal that reports it
 separately from `Enter`. Change the left-hand sides in Lazy's `keys` to
 customize the shortcuts; button hints use the actual mappings.
 
-Threads open in a right-hand split when the source window is at least 108
-columns wide, or in a float when it is narrower. Set `sidebar_min_width` or
-`sidebar_width` to change the layout, or `sidebar_min_width = false` to always
-use floats. The docked browser follows the source cursor. Press `Enter` on a
+`:ThreadList` opens the sidebar regardless of width. Use `:ThreadPopup` for a
+floating browser. When opening an individual thread from the source,
+`:ThreadOpen` reuses an existing sidebar. If it needs a new window, it opens
+a right-hand split at 108 columns or more and floats below that threshold.
+Set `sidebar_min_width` to change the threshold (`false` disables automatic
+docking), or `sidebar_width` to change the split width. The docked browser
+follows the source cursor. Press `Enter` on a
 thread to jump to its text, `o` to open it for replies and edits, or `q` to
 close the browser.
 Moving through the browser previews the corresponding anchor in the source
@@ -162,6 +171,9 @@ comment-threads reopen THREAD_ID --author OpenCode
 
 OpenCode, Codex, Claude Code, and Pi use the same CLI. Output is JSON. `list`
 defaults to open threads; pass `--all`, `--status resolved`, or `--path FILE`.
+`clear --resolved` and `clear --all` permanently delete threads from the
+selected worktree without prompting. Use the Neovim commands if you want a
+confirmation prompt.
 For a multiline reply, pipe the body into `reply` without `--body`. By default,
 `ThreadHandoff` asks the agent to leave threads open for your review.
 

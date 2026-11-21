@@ -4,6 +4,7 @@
 betterleaks = "1.10.1"
 hk = "2.13.0"
 jactionlint = { version = "2.6.0", workflow = "release.yaml" }
+"packslip:github.com/dkarter/tui-shot" = "latest"
 
 [tasks.lint-workflows]
 description = "Validate GitHub Actions workflows"

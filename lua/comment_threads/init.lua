@@ -192,6 +192,26 @@ local function render(buf, root, path, threads)
   return state
 end
 
+local function refresh_visible(predicate)
+  local visible = {}
+  for _, win in ipairs(api.nvim_list_wins()) do
+    local shown = api.nvim_win_get_buf(win)
+    visible[shown] = true
+    if views[shown] then
+      visible[views[shown].source] = true
+    end
+  end
+  for buf, state in pairs(states) do
+    if predicate(state) then
+      if visible[buf] then
+        refresh(buf, true)
+      else
+        state.dirty = true
+      end
+    end
+  end
+end
+
 local function watch_changes()
   if watch or not options.live_updates then
     return
@@ -232,23 +252,9 @@ local function watch_changes()
         if watch ~= handle then
           return
         end
-        local visible = {}
-        for _, win in ipairs(api.nvim_list_wins()) do
-          local shown = api.nvim_win_get_buf(win)
-          visible[shown] = true
-          if views[shown] then
-            visible[views[shown].source] = true
-          end
-        end
-        for buf, state in pairs(states) do
-          if all or queued[state.key] then
-            if visible[buf] then
-              refresh(buf, true)
-            else
-              state.dirty = true
-            end
-          end
-        end
+        refresh_visible(function(state)
+          return all or queued[state.key]
+        end)
         queued, all = {}, false
       end, 80)
     end)
@@ -272,7 +278,7 @@ refresh = function(buf, automatic)
       pending[buf].again = true
       return
     end
-    local request = {}
+    local request = { root = root }
     pending[buf] = request
     call(root, args, nil, function(threads)
       if pending[buf] ~= request then
@@ -354,10 +360,15 @@ local function docked_window(src)
   end
 end
 
-local function open_thread_window(buf, title, src, force_float)
-  local win = not force_float and docked_window(src)
+local function open_thread_window(buf, title, src, layout)
+  if layout == "float" then
+    return float(buf, title)
+  end
+  local win = docked_window(src)
   if not win then
-    if force_float or not options.sidebar_min_width or api.nvim_win_get_width(0) < options.sidebar_min_width then
+    if
+      layout ~= "sidebar" and (not options.sidebar_min_width or api.nvim_win_get_width(0) < options.sidebar_min_width)
+    then
       return float(buf, title)
     end
     vim.cmd(("botright %dvsplit"):format(options.sidebar_width))
@@ -523,7 +534,7 @@ local function view(root, thread, src, existing)
       vim.bo[buf].bufhidden = "wipe"
       api.nvim_buf_set_name(buf, ("comments://%d/Thread"):format(buf))
       local win =
-        open_thread_window(buf, options.sign .. "  Comment thread", src, views[api.nvim_get_current_buf()] ~= nil)
+        open_thread_window(buf, options.sign .. "  Comment thread", src, views[api.nvim_get_current_buf()] and "float")
       vim.bo[buf].filetype = "comment-threads"
       vim.wo[win].spell = false
       vim.wo[win].list = false
@@ -558,10 +569,13 @@ local function view(root, thread, src, existing)
       end
     end
     vim.bo[buf].modifiable = true
-    api.nvim_buf_set_lines(buf, 0, -1, false, {
-      "Thread deleted",
-      keys.undo and ("Press " .. keys.undo .. " to undo.") or "Use :ThreadUndo to restore it.",
-    })
+    local lines = { "Thread deleted" }
+    local stack = history[root] and history[root].undo
+    local change = stack and stack[#stack]
+    if change and change.id == id and change.after == false then
+      lines[2] = keys.undo and ("Press " .. keys.undo .. " to undo.") or "Use :ThreadUndo to restore it."
+    end
+    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.bo[buf].modifiable = false
     api.nvim_buf_clear_namespace(buf, groups.thread, 0, -1)
   end
@@ -754,7 +768,7 @@ local function select_thread(buf, threads, title, cb)
   end)
 end
 
-local function show_browser(source_win, src, filter, dock)
+local function show_browser(source_win, src, filter, layout, dock)
   local name = api.nvim_buf_get_name(src)
   local state = states[src] or { path = name == "" and "[No file]" or vim.fs.basename(name), threads = {} }
   local buf = api.nvim_create_buf(false, true)
@@ -766,10 +780,20 @@ local function show_browser(source_win, src, filter, dock)
     api.nvim_win_set_buf(dock, buf)
     vim.wo[dock].winbar = "%#Title#  " .. title
   else
-    if api.nvim_get_current_win() ~= source_win then
+    local previous = api.nvim_get_current_win()
+    if previous ~= source_win then
       api.nvim_set_current_win(source_win)
     end
-    win = open_thread_window(buf, title, src)
+    local ok, result = pcall(open_thread_window, buf, title, src, layout)
+    if not ok then
+      api.nvim_buf_delete(buf, { force = true })
+      if api.nvim_win_is_valid(previous) then
+        api.nvim_set_current_win(previous)
+      end
+      notice("Could not open comments: " .. result)
+      return
+    end
+    win = result
   end
   vim.bo[buf].filetype = "comment-threads"
   vim.wo[win].spell = false
@@ -884,6 +908,7 @@ local function show_browser(source_win, src, filter, dock)
     kind = "browser",
     source = src,
     source_win = source_win,
+    select = browser.select,
     root = state.root,
     path = state.path,
     filter = filter,
@@ -924,12 +949,14 @@ local function show_browser(source_win, src, filter, dock)
     })
   end
   browser.render(state)
+  return win
 end
 
-local function browse(filter)
+local function browse(filter, layout)
   local src = api.nvim_get_current_buf()
   local source_win = api.nvim_get_current_win()
   local panel = views[src]
+  local obsolete = {}
   if panel then
     local previous = source_win
     src = panel.source
@@ -939,24 +966,147 @@ local function browse(filter)
       return
     end
     if panel.kind == "thread" and api.nvim_win_get_config(previous).relative ~= "" then
-      api.nvim_win_close(previous, false)
+      obsolete[#obsolete + 1] = previous
     end
   end
   refresh(src)
+  local target, dock
   for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
     local existing = views[api.nvim_win_get_buf(win)]
-    if existing and existing.source == src and existing.kind == "browser" then
-      if existing.filter == filter then
-        api.nvim_set_current_win(win)
-        return
+    if existing and existing.kind == "browser" then
+      local floating = api.nvim_win_get_config(win).relative ~= ""
+      if existing.source == src then
+        if not target and existing.filter == filter and floating == (layout == "float") then
+          target = win
+        elseif floating or layout == "float" then
+          obsolete[#obsolete + 1] = win
+        end
+      elseif layout == "sidebar" and not floating and existing.source_win == source_win then
+        dock = win
       end
-      if api.nvim_win_get_config(win).relative ~= "" then
-        api.nvim_win_close(win, false)
-      end
-      break
     end
   end
-  show_browser(source_win, src, filter)
+  if target then
+    api.nvim_set_current_win(target)
+  else
+    if dock and docked_window(src) then
+      dock = nil
+    end
+    target = show_browser(source_win, src, filter, layout, dock)
+  end
+  if target then
+    for _, win in ipairs(obsolete) do
+      api.nvim_win_close(win, false)
+    end
+    api.nvim_set_current_win(target)
+  end
+  return target
+end
+
+local function source_context()
+  local buf = api.nvim_get_current_buf()
+  local panel = views[buf]
+  local root = source(panel and panel.source or buf)
+  if not root then
+    notice("Open a source file in the worktree first")
+  end
+  return root, panel and panel.source_win or api.nvim_get_current_win()
+end
+
+local function select_thread(root, win, threads)
+  if not threads then
+    return
+  end
+  if #threads == 0 then
+    notice("No comment threads in this worktree")
+    return
+  end
+  vim.ui.select(threads, {
+    prompt = "Find comment threads",
+    format_item = function(thread)
+      local body = thread.messages[1].body:gsub("%s+", " ")
+      return ("%s:%d [%s] %s"):format(thread.path, thread.anchor.line, thread.status, body)
+    end,
+  }, function(thread)
+    if not thread then
+      return
+    end
+    local path = vim.uv.fs_realpath(vim.fs.joinpath(root, thread.path))
+    if not path or not vim.fs.relpath(root, path) or vim.fn.filereadable(path) ~= 1 then
+      notice("Source file not found inside this worktree: " .. thread.path)
+      return
+    end
+    if api.nvim_win_is_valid(win) then
+      api.nvim_set_current_win(win)
+    end
+    local buf = vim.fn.bufadd(path)
+    if buf ~= api.nvim_get_current_buf() then
+      local ok, err = pcall(vim.cmd.buffer, { args = { tostring(buf) }, mods = { hide = true } })
+      if not ok then
+        notice("Could not open " .. thread.path .. ": " .. err)
+        return
+      end
+    end
+    local marker = states[buf] and states[buf].markers[thread.id]
+    local range = marker and vim.deep_equal(marker.anchor, thread.anchor) and mark_range(buf, marker.mark)
+    range = range or anchor.locate(anchor.snapshot(buf), thread.anchor)
+    if range then
+      api.nvim_win_set_cursor(0, { range[1] + 1, range[2] })
+      vim.cmd("normal! zv")
+    else
+      notice("Thread needs reattaching: " .. thread.path)
+    end
+    local sidebar = browse("all", "sidebar")
+    if sidebar then
+      views[api.nvim_win_get_buf(sidebar)].select(thread.id)
+    end
+  end)
+end
+
+local function pick_thread()
+  local root, win = source_context()
+  if root then
+    call(root, { "list", "--all" }, nil, function(threads)
+      if api.nvim_win_is_valid(win) then
+        select_thread(root, win, threads)
+      end
+    end)
+  end
+end
+
+local function clear_threads(resolved_only)
+  local root = source_context()
+  if not root then
+    return
+  end
+  local scope = resolved_only and "resolved" or "all"
+  local prompt = ("Permanently clear %s comment threads in:\n%s\n\nThis cannot be undone."):format(scope, root)
+  if vim.fn.confirm(prompt, "&Clear\n&Keep comments", 2) ~= 1 then
+    return
+  end
+  local result = call(root, { "clear", "--" .. scope })
+  if not result then
+    return
+  end
+  if result.cleared > 0 then
+    history[root] = nil
+    local first_reads = {}
+    for buf, request in pairs(pending) do
+      if request.root == root then
+        pending[buf] = nil
+        if not states[buf] and api.nvim_buf_is_loaded(buf) then
+          first_reads[#first_reads + 1] = buf
+        end
+      end
+    end
+    refresh_visible(function(state)
+      return state.root == root
+    end)
+    for _, buf in ipairs(first_reads) do
+      refresh(buf, true)
+    end
+  end
+  notice(("Cleared %d comment thread(s)"):format(result.cleared), vim.log.levels.INFO)
 end
 
 local function retarget_sidebar(src)
@@ -983,7 +1133,7 @@ local function retarget_sidebar(src)
           and api.nvim_win_is_valid(win)
           and api.nvim_win_get_buf(win) == shown
         then
-          show_browser(source_win, src, panel.filter or "all", win)
+          show_browser(source_win, src, panel.filter or "all", nil, win)
         end
       end)
     end
@@ -1345,19 +1495,28 @@ function M.setup(opts)
   api.nvim_create_user_command("ThreadRefresh", function()
     refresh(api.nvim_get_current_buf())
   end, {})
-  api.nvim_create_user_command("ThreadList", function(cmd)
-    local status = cmd.args == "" and "all" or cmd.args
-    if status ~= "all" and status ~= "open" and status ~= "resolved" then
-      notice("Use :ThreadList open, resolved, or all")
-      return
-    end
-    browse(status)
-  end, {
-    nargs = "?",
-    complete = function()
-      return { "open", "resolved", "all" }
-    end,
-  })
+  for name, layout in pairs({ ThreadList = "sidebar", ThreadPopup = "float" }) do
+    api.nvim_create_user_command(name, function(cmd)
+      local status = cmd.args == "" and "all" or cmd.args
+      if status ~= "all" and status ~= "open" and status ~= "resolved" then
+        notice("Use :" .. name .. " open, resolved, or all")
+        return
+      end
+      browse(status, layout)
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "open", "resolved", "all" }
+      end,
+    })
+  end
+  api.nvim_create_user_command("ThreadFind", pick_thread, {})
+  api.nvim_create_user_command("ThreadClearResolved", function()
+    clear_threads(true)
+  end, {})
+  api.nvim_create_user_command("ThreadClearAll", function()
+    clear_threads(false)
+  end, {})
   api.nvim_create_user_command("ThreadHandoff", function()
     local root = source(api.nvim_get_current_buf())
     if root then

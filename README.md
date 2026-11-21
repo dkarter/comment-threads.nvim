@@ -42,7 +42,9 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
   keys = {
     { "<leader>cn", "<cmd>ThreadAdd<cr>", desc = "New comment" },
     { "<leader>cn", function() require("comment_threads").add_selection() end, mode = "x", desc = "Comment on selection" },
-    { "<leader>cl", "<cmd>ThreadList<cr>", desc = "List threads" },
+    { "<leader>cl", "<cmd>ThreadList<cr>", desc = "List threads in sidebar" },
+    { "<leader>cp", "<cmd>ThreadPopup<cr>", desc = "List threads in popup" },
+    { "<leader>cf", "<cmd>ThreadFind<cr>", desc = "Find threads across files" },
     { "<CR>", "<Plug>(comment-threads-activate)", ft = "comment-threads" },
     { "o", "<Plug>(comment-threads-open)", ft = "comment-threads" },
     { "q", "<Plug>(comment-threads-close)", ft = { "comment-threads", "markdown.comment-thread-draft" } },
@@ -58,9 +60,14 @@ plugin managers, a full mapping example, mouse controls, and CLI usage.
 
 - Press `<leader>cn` on a saved file to comment on the current line or visual
   selection. Write your comment and save with `:w`.
-- Run `:ThreadList` to browse threads, or `:ThreadOpen` to open the thread
+- Run `:ThreadList` to browse threads in the sidebar, `:ThreadPopup` to browse
+  in a floating window, or `:ThreadOpen` to open the thread
   under the cursor.
 - Run `:ThreadHandoff` to copy a prompt for an agent in the same worktree.
+- Run `:ThreadFind` to find a comment in any file in this worktree and select
+  it in the sidebar.
+- Run `:ThreadClearResolved` or `:ThreadClearAll` to permanently clear threads
+  from this worktree after confirmation.
 
 ## In action
 

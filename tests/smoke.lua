@@ -116,6 +116,7 @@ vim.keymap.set("n", "[v", function()
   plugin.jump(-1)
 end)
 vim.keymap.set("n", "<leader>cl", "<cmd>ThreadList all<cr>")
+vim.keymap.set("n", "<leader>cp", "<cmd>ThreadPopup all<cr>")
 vim.keymap.set("n", "<leader>cn", "<cmd>ThreadAdd<cr>")
 vim.cmd.ThreadRefresh()
 api.nvim_win_set_cursor(0, { 1, 0 })
@@ -132,7 +133,8 @@ vim.cmd.ThreadRefresh()
 vim.cmd("normal ]v")
 assert(vim.deep_equal(api.nvim_win_get_cursor(0), { 3, 5 }))
 
-api.nvim_feedkeys(" cl", "mx", false)
+api.nvim_feedkeys(" cp", "mx", false)
+assert(api.nvim_win_get_config(0).relative == "editor")
 local listing = api.nvim_get_current_buf()
 local function contents(target)
   return table.concat(api.nvim_buf_get_lines(target, 0, -1, false), "\n")
@@ -219,6 +221,28 @@ assert(api.nvim_get_current_buf() == buf and fresh ~= buf)
 api.nvim_set_current_win(dock)
 vim.cmd.close()
 plugin.setup(vim.tbl_extend("force", options, { sidebar_min_width = false }))
+api.nvim_feedkeys(" cl", "mx", false)
+assert(api.nvim_win_get_config(0).relative == "")
+local sidebar = api.nvim_get_current_win()
+vim.cmd.ThreadPopup()
+assert(not api.nvim_win_is_valid(sidebar))
+assert(api.nvim_win_get_config(0).relative == "editor")
+local popup = api.nvim_get_current_win()
+local min_width, preferred_width = vim.o.winminwidth, vim.o.winwidth
+local too_wide = math.floor(vim.o.columns / 2) + 1
+vim.o.winwidth = too_wide
+vim.o.winminwidth = too_wide
+local buffers_before = #api.nvim_list_bufs()
+vim.cmd.ThreadList()
+assert(api.nvim_get_current_win() == popup)
+assert(#api.nvim_list_bufs() == buffers_before)
+vim.o.winminwidth = min_width
+vim.o.winwidth = preferred_width
+vim.cmd("ThreadList open")
+assert(not api.nvim_win_is_valid(popup))
+assert(api.nvim_win_get_config(0).relative == "")
+assert(contents(api.nvim_get_current_buf()):find("1 thread", 1, true))
+vim.cmd.close()
 vim.cmd.ThreadOpen()
 assert(api.nvim_win_get_config(0).relative == "editor")
 local detail = api.nvim_get_current_buf()
@@ -411,4 +435,72 @@ end
 vim.cmd.ThreadOpen()
 vim.ui.select = select
 assert(contents(api.nvim_get_current_buf()):find("Reply (gr)", 1, true))
+
+-- Search across files and clear only the requested threads in this workspace.
+api.nvim_set_current_win(source_win)
+local other_path = root .. "/other file%.md"
+vim.fn.writefile({ "Other file", "A comment target." }, other_path)
+vim.cmd.edit(vim.fn.fnameescape(other_path))
+local other = call(
+  { "create", "--author", "Human" },
+  vim.json.encode({
+    path = "other file%.md",
+    anchor = assert(anchors.capture(0, { 0, 2, 1, 0 }, { 0, 2, 1, 0 }, "V")),
+    body = "Search me across files.",
+  })
+)
+vim.cmd.edit(vim.fn.fnameescape(root .. "/sample.md"))
+vim.cmd.ThreadList()
+local find_sidebar = api.nvim_get_current_win()
+vim.ui.select = function(items, opts, choose)
+  for _, item in ipairs(items) do
+    if item.id == other.id then
+      assert(opts.format_item(item):find("other file%.md:2 [open] Search me across files.", 1, true))
+      choose(item)
+      return
+    end
+  end
+  error("Missing the other file's comment")
+end
+vim.cmd.ThreadFind()
+assert(vim.wait(5000, function()
+  return vim.bo.filetype == "comment-threads" and contents(api.nvim_get_current_buf()):find("other file%.md", 1, true)
+end))
+assert(api.nvim_get_current_win() == find_sidebar)
+assert(api.nvim_win_get_config(find_sidebar).relative == "")
+assert(contents(api.nvim_get_current_buf()):find("Open · L2:1", 1, true))
+local other_win = vim.fn.bufwinid(other_path)
+assert(api.nvim_win_get_cursor(other_win)[1] == 2)
+api.nvim_set_current_win(other_win)
+vim.cmd.ThreadRefresh()
+api.nvim_buf_set_lines(0, 0, 0, false, { "Unsaved line." })
+api.nvim_win_set_cursor(0, { 1, 0 })
+vim.cmd.ThreadFind()
+assert(vim.wait(5000, function()
+  return api.nvim_get_current_win() == find_sidebar and api.nvim_win_get_cursor(other_win)[1] == 3
+end))
+vim.ui.select = select
+api.nvim_set_current_win(other_win)
+assert(vim.bo.modified)
+assert(run({ "clear" }).code ~= 0)
+assert(run({ "clear", "--all", "--resolved" }).code ~= 0)
+call({ "resolve", other.id, "--author", "Human" })
+local open_count = #call({ "list" })
+assert(open_count > 0)
+vim.fn.confirm = function(_, _, default)
+  assert(default == 2)
+  return 2
+end
+vim.cmd.ThreadClearAll()
+assert(#call({ "list", "--all" }) > open_count)
+vim.fn.confirm = function()
+  return 1
+end
+vim.cmd.ThreadClearResolved()
+assert(#call({ "list", "--all" }) == open_count)
+assert(run({ "show", other.id }).code ~= 0)
+vim.cmd.ThreadClearAll()
+vim.fn.confirm = confirm
+assert(#call({ "list", "--all" }) == 0)
+assert(call({ "clear", "--all" }).cleared == 0)
 print("Anchor and CLI smoke tests passed")

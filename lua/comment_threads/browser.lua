@@ -346,6 +346,15 @@ function M.open(buf, win, source_win, filter, legacy, callbacks)
     render = render,
     follow = follow,
     preview = preview,
+    select = function(id)
+      for _, section in ipairs(sections) do
+        if section.thread.id == id then
+          pin(section.header)
+          preview()
+          return
+        end
+      end
+    end,
     click = function(row, col)
       return controls.hit(buttons, row, col)
     end,

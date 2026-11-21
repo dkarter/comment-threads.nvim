@@ -1168,7 +1168,6 @@ end
 function M.setup(opts)
   vim.treesitter.language.register("markdown", "markdown.comment-thread-draft")
   options = vim.tbl_extend("force", {
-    cli = plugin .. "/bin/comment-threads",
     author = vim.env.USER or vim.env.USERNAME or "human",
     mappings = {},
     sidebar_min_width = 108,
@@ -1179,12 +1178,13 @@ function M.setup(opts)
     live_updates = true,
     author_icons = {},
   }, opts or {})
+  options.cli = options.cli or require("comment_threads.native").command(plugin)
   if watch and not options.live_updates then
     watch:close()
     watch = nil
   end
   if vim.fn.executable(options.cli) ~= 1 then
-    notice("Cannot execute " .. options.cli)
+    notice("Missing comment-threads binary. Run :Lazy build comment-threads.nvim or set the cli option.")
     return
   end
   local function highlights()

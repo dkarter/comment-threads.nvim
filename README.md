@@ -22,9 +22,9 @@ No pasted excerpts, no review notes in your diff.
 
 ## Install
 
-Requires Neovim 0.11+, Python 3.9+ with SQLite for the bundled CLI, and Git
-for worktree detection. The CLI uses Python’s standard library; no `pip`
-install is needed.
+Requires Neovim 0.11+, Git, curl, and `shasum` or `sha256sum`. The release
+binary bundles SQLite, so you don’t need Python, Rust, or a separate SQLite
+install. Prebuilt binaries support macOS and Linux on ARM64 and x86-64.
 
 A Nerd Font renders the UI icons. The agent logos in the screenshots use
 [Agent Mono Nerd Font](https://github.com/dkarter/dotfiles/tree/master/assets/fonts).
@@ -36,6 +36,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "dkarter/comment-threads.nvim",
   main = "comment_threads",
+  version = "*",
   lazy = false,
   opts = {},
   keys = {
@@ -49,10 +50,9 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
-With another plugin manager, add the plugin to your runtime path and call
-`require("comment_threads").setup(opts)`. The plugin does not bind keys unless
-configured. See [configuration](doc/configuration.md) for a full mapping
-example, mouse controls, and CLI usage.
+Lazy runs `build.lua` to install the binary matching the plugin tag and
+check its SHA-256. See [configuration](doc/configuration.md) for other
+plugin managers, a full mapping example, mouse controls, and CLI usage.
 
 ## Try it
 

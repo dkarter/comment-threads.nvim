@@ -7,8 +7,10 @@ GitHub PR, hosted service, or agent-specific integration is required.
 
 ## Installation
 
-Requires Neovim 0.11+, `python3` (3.9+ with SQLite) on your `PATH`, and Git
-for worktree detection. A Nerd Font renders the sidebar icons.
+Requires Neovim 0.11+, Git, curl, and `shasum` or `sha256sum`. The CLI is a
+native binary with SQLite built in. Prebuilt binaries support macOS and Linux
+on ARM64 and x86-64.
+A Nerd Font renders the sidebar icons.
 
 With [lazy.nvim](https://github.com/folke/lazy.nvim), start with the following
 spec. These mappings are opt-in; the plugin does not bind keys by default.
@@ -17,6 +19,7 @@ spec. These mappings are opt-in; the plugin does not bind keys by default.
 {
   "dkarter/comment-threads.nvim",
   main = "comment_threads",
+  version = "*",
   lazy = false,
   keys = {
     { "<leader>cn", "<cmd>ThreadAdd<cr>", desc = "New comment thread" },
@@ -48,8 +51,25 @@ spec. These mappings are opt-in; the plugin does not bind keys by default.
 }
 ```
 
-With another plugin manager, add the repository to your runtime path and
-call `require("comment_threads").setup(opts)`.
+Lazy runs the repository's `build.lua` on install and update. It downloads
+the asset for the checked-out tag, requires an immutable GitHub release,
+and verifies the SHA-256 before installing the executable. It does not
+download anything at Neovim startup.
+
+With another plugin manager, check out a release tag and run
+`nvim --headless -u NONE -i NONE -l build.lua` from the plugin directory.
+Add the repository to your runtime path and call
+`require("comment_threads").setup(opts)`. Set `cli` in `opts` to use a
+manually installed binary instead.
+
+For a development checkout, run `cargo build --locked --release`. The plugin
+finds the local build automatically. If you use Lazy with a local checkout,
+set `build = "cargo build --locked --release"` in that spec.
+
+GitHub publishes release and build attestations. For independent provenance
+verification, run `gh attestation verify <binary> --repo dkarter/comment-threads.nvim`.
+The installer checks the release metadata and digest; it does not verify
+the build attestation.
 
 ## In Neovim
 
@@ -125,8 +145,8 @@ and individual threads. Set `live_updates = false` to disable the watcher.
 ## In the agent pane
 
 Run `:ThreadHandoff` to copy a prompt containing the absolute path to the
-bundled CLI. To use the commands below, put the plugin's `bin` directory on
-your `PATH` or replace `comment-threads` with that absolute path.
+bundled CLI. To use the commands below, put the plugin's `bin/<version>`
+directory on your `PATH` or replace `comment-threads` with that absolute path.
 
 Run the CLI in the same Git worktree (or pass `--root /path/to/worktree`
 before the subcommand). Check the quoted text and context before changing a

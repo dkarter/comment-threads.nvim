@@ -1,7 +1,7 @@
 local api = vim.api
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
 local anchors = require("comment_threads.anchor")
-local cli = vim.fn.getcwd() .. "/bin/comment-threads"
+local cli = vim.env.COMMENT_THREADS_CLI or vim.fn.getcwd() .. "/target/debug/comment-threads"
 local sandbox = vim.fn.tempname()
 vim.fn.mkdir(sandbox .. "/worktree", "p")
 vim.env.XDG_DATA_HOME = sandbox .. "/data"
@@ -59,7 +59,8 @@ local reply = call({ "reply", second.id, "--author", "Agent" }, "Changed it.\nPl
 assert(#reply.messages == 2 and reply.messages[2].author == "Agent")
 local message = reply.messages[1]
 local edit = { "edit", second.id, tostring(message.id), "--revision", tostring(message.revision) }
-assert(call(edit, "Edited").messages[1].revision == 2)
+local edited = call(vim.list_extend(vim.deepcopy(edit), { "--body", "- Edited" })).messages[1]
+assert(edited.revision == 2 and edited.body == "- Edited")
 assert(run(edit, "Stale draft").code ~= 0)
 call({ "resolve", second.id, "--author", "Agent" })
 assert(#call({ "list" }) == 1)
@@ -79,6 +80,7 @@ vim.cmd("edit!")
 vim.g.mapleader = " "
 local plugin = require("comment_threads")
 local options = {
+  cli = cli,
   author = "Human",
   mappings = {
     composer = { post = "<C-CR>", close = "q" },
@@ -391,7 +393,7 @@ api.nvim_create_autocmd("FileType", {
     end
   end,
 })
-plugin.setup({ author = "Human", sidebar_min_width = false })
+plugin.setup({ cli = cli, author = "Human", sidebar_min_width = false })
 api.nvim_set_current_win(source_win)
 vim.cmd.ThreadAdd()
 assert(vim.bo.filetype == "markdown.comment-thread-draft")

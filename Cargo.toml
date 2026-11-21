@@ -1,0 +1,21 @@
+[package]
+name = "comment-threads"
+version = "0.1.0"
+edition = "2024"
+description = "Local review threads shared by Neovim and terminal agents"
+license = "MIT"
+repository = "https://github.com/dkarter/comment-threads.nvim"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.6", features = ["derive"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+strip = true
+lto = "thin"

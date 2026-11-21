@@ -1,5 +1,16 @@
 # Development
 
+Install the repository tools and Git hooks:
+
+```sh
+mise install
+mise exec -- hk install --mise
+```
+
+Before each commit, hk scans staged changes for secrets with Betterleaks and
+lints changed GitHub Actions files with jactionlint. Use
+`mise run lint-workflows` to check all workflows.
+
 Build the Rust CLI and run the smoke suite from the repository root:
 
 ```sh
@@ -26,10 +37,12 @@ and confirm it appears without a manual refresh.
 
 Enable **release immutability** and allow GitHub Actions to create pull
 requests in the repository settings. Use Conventional Commits so Release
-Please can open a versioned release PR. Merging that PR creates a draft
-and builds, attests, and attaches the four platform binaries. The version
-tag becomes visible to plugin managers only when you publish the release.
+Please can open a versioned release PR. Merging that PR creates a draft.
+Release Please's `release_created` output starts the workflow that builds,
+tests, attests, and uploads the four platform binaries. The workflow verifies
+the uploaded digests before publishing. The version tag becomes visible to
+plugin managers only when GitHub publishes the release.
 
-Review the workflow and publish the draft only after every binary is
-attached. Publishing makes the tag and assets immutable. The **Release**
-workflow can be run manually with an existing draft tag to retry a build.
+Do not publish or upload binaries by hand. If a release fails before
+publication, run the **Release** workflow on `main` with the existing draft
+tag. The retry rebuilds and verifies the assets before publishing.

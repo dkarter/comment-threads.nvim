@@ -1,0 +1,22 @@
+amends "package://github.com/jdx/hk/releases/download/v2.13.0/hk@2.13.0#/Config.pkl"
+
+hooks {
+  ["pre-commit"] {
+    steps {
+      ["betterleaks"] {
+        check = new CommandSpec {
+          command = "betterleaks git --staged --redact --no-banner --validation=false"
+          effect = "read"
+        }
+      }
+      ["jactionlint"] {
+        glob = List(".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/actions/**/action.yml", ".github/actions/**/action.yaml")
+        batch = true
+        check = new CommandSpec {
+          command = "jactionlint {{files}}"
+          effect = "read"
+        }
+      }
+    }
+  }
+}

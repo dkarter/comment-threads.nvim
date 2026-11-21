@@ -1,0 +1,10 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tools]
+betterleaks = "1.10.1"
+hk = "2.13.0"
+jactionlint = { version = "2.6.0", workflow = "release.yaml" }
+
+[tasks.lint-workflows]
+description = "Validate GitHub Actions workflows"
+run = "jactionlint"

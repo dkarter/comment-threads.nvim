@@ -6,12 +6,16 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Version tag of an existing draft release to rebuild
+        description: Version tag of an existing draft release to rebuild and publish
         required: true
         type: string
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 concurrency:
   group: release
@@ -19,7 +23,9 @@ concurrency:
 
 jobs:
   prepare:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
@@ -46,6 +52,7 @@ jobs:
   build:
     needs: prepare
     if: needs.prepare.outputs.tag != ''
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -106,9 +113,10 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  attach:
+  publish:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     env:
@@ -121,12 +129,34 @@ jobs:
           pattern: comment-threads-*
           path: dist
           merge-multiple: true
-      - name: Attach binaries to draft
+      - name: Upload and verify draft assets
         run: |
-          commit=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,targetCommitish --jq 'select(.isDraft) | .targetCommitish')
-          test "$commit" = "$COMMIT"
-          assets=(dist/comment-threads-*)
-          test "${#assets[@]}" -eq 4
+          assets=(
+            dist/comment-threads-aarch64-apple-darwin
+            dist/comment-threads-aarch64-unknown-linux-musl
+            dist/comment-threads-x86_64-apple-darwin
+            dist/comment-threads-x86_64-unknown-linux-musl
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          expected=$(sha256sum "${assets[@]}" | jq -Rsc '
+            split("\n") | map(select(length > 0) | split("  ") |
+            {name: (.[1] | ltrimstr("dist/")), digest: ("sha256:" + .[0])}) |
+            sort_by(.name)')
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish)
+          jq -e --arg commit "$COMMIT" '.isDraft and .targetCommitish == $commit' <<<"$draft"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
-          echo "Binaries are attached to $TAG. Publish the draft after confirming release immutability is enabled." >> "$GITHUB_STEP_SUMMARY"
+          draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish,assets)
+          jq -e --arg commit "$COMMIT" --argjson expected "$expected" '
+            .isDraft and .targetCommitish == $commit and
+            ([.assets[] | {name, digest}] | sort_by(.name)) == $expected
+          ' <<<"$draft"
+      - name: Publish the verified draft
+        run: |
+          # GitHub creates the version tag from the draft's commit at publication.
+          existing_tag=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$TAG")
+          test -z "$existing_tag"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isImmutable |
+            jq -e '(.isDraft == false) and .isImmutable'

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/dkarter/comment-threads.nvim/compare/v0.2.0...v0.3.0) (2026-11-21)
+
+
+### Features
+
+* improve comment browsing and cleanup ([d5b344e](https://github.com/dkarter/comment-threads.nvim/commit/d5b344e32b037e2c82b59ad7d55480076d34777d))
+
+
+### Bug Fixes
+
+* **ci:** wait for release publication before generating notes ([2f6c994](https://github.com/dkarter/comment-threads.nvim/commit/2f6c994b602fea4c4cdb02a929f8460645eeeffc))
+
 ## [0.2.0](https://github.com/dkarter/comment-threads.nvim/compare/v0.1.0...v0.2.0) (2026-11-21)
 
 
